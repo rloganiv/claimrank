@@ -20,11 +20,13 @@ def test_forward():
 
     sentences = torch.randint(vocab_size, (batch_size, sentence_length),
                               dtype=torch.long)
+    sentence_masks = torch.rand(batch_size, sentence_length).gt(0.5)
     claims = torch.randint(vocab_size, (batch_size, num_claims, claim_length),
                            dtype=torch.long)
+    claim_masks = torch.rand(batch_size, num_claims, claim_length).gt(0.5)
 
     # Compute scores
-    scores = apn(sentences, claims)
+    scores = apn(sentences, sentence_masks.float(), claims, claim_masks.float())
 
     # Test is passed if no errors were raised :)
 
