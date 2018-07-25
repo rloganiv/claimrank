@@ -19,6 +19,10 @@ PMInstance = namedtuple('PMInstance', ['input_sentence', 'entity_name',
 WikiInstance = namedtuple('WikiInstance', ['wiki_id', 'entity_name', 'aliases',
                                            'description', 'claims'])
 Claim = namedtuple('Claim', ['field_name', 'value', 'qualifiers'])
+Instance = namedtuple('Instance', ['input_sentence', 'entity_name',
+                                   'post_modifier', 'gold_sentence',
+                                   'wiki_id', 'previous_sentence',
+                                   'blank', 'claims', 'overlap_scores'])
 
 
 def load_pm(filename):
@@ -64,6 +68,135 @@ def load_wiki(filename):
     return out
 
 
+def merge(pm, wiki):
+    """Merges entries in a .pm and .wiki file into single ``Instance`` tuples.
+
+    Parameters
+    ----------
+    pm : List[PMInstance]
+    wiki : List[WikiInstance]
+
+    Returns
+    -------
+    A list of ``Instances``.
+    """
+    out = []
+    stopword_set = set(stopwords.words('english'))
+    for pm_instance in pm:
+        post_modifier = pm_instance.post_modifier
+        wiki_instance = wiki[pm_instance.wiki_id]
+        claims = wiki_instance.claims
+        overlap_scores = [overlap_score(post_modifier, claim, stopword_set) for claim in claims]
+        instance = Instance(*pm_instance, claims, overlap_scores)
+        out.append(instance)
+    return out
+
+
+# TODO: Fix name conflict for stopwords (affects code below)
+def overlap_score(post_modifier, claim, stopword_set):
+    """Computes the overlap between a post modifier and a claim.
+
+    Overlap score is computed as:
+        intersection(post_modifier, claim) / len(post_modifier)
+
+    Parameters
+    ----------
+    post_modifier : str
+    claim : Claim
+    stopword_set : set
+        Stopwords to filter from ``post_modifier``computing overlap.
+
+    Returns
+    -------
+    overlap_score : float
+    """
+    def _preprocess(string):
+        tokens = string.strip().lower().split()
+        token_set = set(tokens)
+        filtered_token_set = token_set.difference(stopword_set)
+        return filtered_token_set
+    # Extract set of relevant tokens in post modifier
+    post_modifier_set = _preprocess(post_modifier)
+
+    # Extract set of relevant tokens from claim
+    claim_set = set()
+    claim_set.update(_preprocess(claim.field_name))
+    claim_set.update(_preprocess(claim.value))
+    for qualifier in claim.qualifiers:
+        qualifier_string = ' '.join(qualifier)
+        claim_set.update(_preprocess(qualifier_string))
+
+    # Compute and return overlap score
+    overlap_score = len(post_modifier_set.intersection(claim_set))/len(post_modifier_set)
+    return overlap_score
+
+
+def pad(input, pad_value=0):
+    if isinstance(input[0][0], list):
+        outer_max_len = max(len(x) for x in input)
+        inner_max_len = max(len(y) for x in input for y in x)
+        padded = []
+        for outer_seq in input:
+            if len(outer_seq) < outer_max_len:
+                for _ in range(outer_max_len - len(outer_seq)):
+                    outer_seq.append([])
+            entry = []
+            for inner_seq in outer_seq:
+                entry.append(inner_seq + [pad_value]*(inner_max_len - len(inner_seq)))
+            padded.append(entry)
+    else:
+        max_len = max(len(x) for x in input)
+        padded = [x + [pad_value]*(max_len - len(x)) for x in input]
+    return padded
+
+
+def batch_collate_fn(batch):
+    inputs, claims, scores, pms = zip(*batch)
+    inputs = torch.tensor(pad(inputs))
+    claims = torch.tensor(pad(claims))
+    scores = torch.tensor(pad(scores))
+    pms = torch.tensor(pad(pms))
+    return inputs, claims, scores, pms
+
+
+class SimplePMDataset(data.Dataset):
+    def __init__(self, prefix, vocab, maxlen=300):
+        """A simplified post modifier data loader.
+
+        Parameters
+        ----------
+        prefix : str
+            Path to .pm and .wiki file
+        vocab : Dictionary
+            Vocabulary for mapping tokens to ids.
+        maxlen : int, optional
+            Maximum number of tokens.
+        """
+        self._prefix = prefix
+        self._vocab = vocab
+        self._maxlen = maxlen
+
+        pm = load_pm(prefix + '.pm')
+        wiki = load_wiki(prefix + '.wiki')
+        self._data = merge(pm, wiki)
+
+    def __getitem__(self, i):
+        instance = self._data[i]
+        sentence = self._vocab.map_sentence(instance.input_sentence)
+        if len(sentence) > self._maxlen:
+            sentence = sentence[:self._maxlen]
+        claims = [claim.field_name + ' ' + claim.value for claim in instance.claims]
+        claims = [self._vocab.map_sentence(claim) for claim in claims]
+        scores = [1 if x > 0 else 0 for x in instance.overlap_scores]
+        post_modifier = self._vocab.map_sentence(instance.post_modifier)
+        if len(post_modifier) > self._maxlen:
+            post_modifier = post_modifier[:self._maxlen]
+        return sentence, claims, scores, post_modifier
+
+    def __len__(self):
+        return len(self._data)
+
+
 class Dictionary(object):
     def __init__(self):
         self.word2idx = {}
@@ -102,6 +235,13 @@ class Dictionary(object):
 
     def __len__(self):
         return len(self.word2idx)
+
+    def map_sentence(self, sentence):
+        tokens = sentence.strip().lower().split()
+        unk_idx = self.word2idx['<oov>']
+        ids = [self.word2idx[x] if x in self.word2idx else unk_idx for x in tokens]
+        ids = [self.word2idx['<sos>']] + ids + [self.word2idx['<eos>']]
+        return ids
 
 
 class PMDataset(data.Dataset):

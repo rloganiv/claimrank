@@ -1,1 +1,2 @@
-from claimrank.dataset.load import load_pm, load_wiki
+# TODO: Split load into seperate modules
+from claimrank.dataset.load import *
