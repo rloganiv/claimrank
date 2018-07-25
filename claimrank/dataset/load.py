@@ -148,7 +148,7 @@ class PMDataset(data.Dataset):
             num_pos_claims = min(len(overlap_scores[overlap_scores>0]),1)
             num_neg_claims = min(1, len(overlap_scores[overlap_scores==0]))
             if (num_pos_claims==0):
-                print("No positive claim found for {0}".format(instance.post_modifier))
+                #print("No positive claim found for {0}".format(instance.post_modifier))
                 cnt_no_pos+=1
                 continue
             positive_claims = sample_claims[:num_pos_claims]
@@ -168,6 +168,8 @@ class PMDataset(data.Dataset):
             
             self.maxlen_sent = max(self.maxlen_sent, len(sentence))
         print("Total #instance with no positive claims {0}".format(cnt_no_pos))
+        print("Max length for sentences {0}".format(self.maxlen_sent))
+        print("Max length for claim {0}".format(self.maxlen_claim))
         return data
     
     def __getitem__(self, index):

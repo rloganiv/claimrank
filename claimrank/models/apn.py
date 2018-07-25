@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
 
 from claimrank.utils import masked_softmax
 
@@ -89,6 +90,7 @@ class AttentivePoolingNetwork(torch.nn.Module):
         # Apply bilinear transformation
         lhs = self._bilinear_fc(convolved_claims.transpose(1,2))
         transformed = torch.bmm(lhs, convolved_sentences)
+        transformed = nn.Tanh()(transformed)
 
         # Pool to get attention over words in sentence
         pooled1, _ = transformed.max(dim=1)
@@ -105,8 +107,9 @@ class AttentivePoolingNetwork(torch.nn.Module):
         encoded_claims = encoded_claims.sum(-1)
 
         # Compute scores
-        scores = torch.einsum('bi,bi->b', (encoded_sentences, encoded_claims))
-        scores = scores.view(batch_size, num_claims)
+#         scores = torch.einsum('bi,bi->b', (encoded_sentences, encoded_claims))
+        scores = nn.CosineSimilarity()(encoded_sentences, encoded_claims)
+#         scores = scores.view(batch_size, num_claims)
 
         return scores
 
