@@ -55,10 +55,10 @@ def collate_pm(batch):
     positive_fields = torch.Tensor([[[1]+c_name+[2]+[0]*(corpus_train.maxlen_claim-len(c_name)) for (c_name,_,_) in pc] for pc in positive_claims])
     positive_scores = torch.Tensor([[c_score for (_,_,c_score) in pc] for pc in positive_claims])
     positive_scores.fill_(1)
-    #try:
+    
+#     print([[len([1]+c_name+[2]+[0]*(corpus_train.maxlen_claim-len(c_name))) for (c_name,_,_) in pc] for pc in negative_claims])
     negative_fields = torch.Tensor([[[1]+c_name+[2]+[0]*(corpus_train.maxlen_claim-len(c_name)) for (c_name,_,_) in pc] for pc in negative_claims])
-  #  except Exception:
-   #     print("here")
+
 #     negative_scores = torch.Tensor([[c_score for (_,_,c_score) in pc] for pc in negative_claims])
     negative_scores = positive_scores.clone().fill_(-1)
     
@@ -72,7 +72,7 @@ train_data = torch.utils.data.DataLoader(corpus_train,  batch_size = args.batch_
 train_iter = iter(train_data)
 test_data = torch.utils.data.DataLoader(corpus_test, batch_size = args.batch_size, collate_fn=collate_pm, shuffle=False)
 test_iter = iter(test_data)
-criterion = nn.HingeEmbeddingLoss()
+criterion = nn.MarginRankingLoss()
 
 model = AttentivePoolingNetwork(len(vocab.word2idx),100,500)
 optimizer = optim.Adam(model.parameters(),lr=5e-4,betas=(0.9, 0.999))
@@ -88,7 +88,9 @@ for ep in range(0,args.epochs):
         claims = claims.long()
         sentences_mask = sentences.gt(0).float()
         claims_mask = claims.gt(0).float()
-        target = torch.cat([positive_scores,negative_scores],0).squeeze()
+#         target = torch.cat([positive_scores,negative_scores],0).squeeze()
+
+        target = torch.Tensor(sentences.size(0),5).fill_(1)
         if args.cuda:
             sentences = sentences.cuda()
             sentences_mask = sentences_mask.cuda()
@@ -97,10 +99,13 @@ for ep in range(0,args.epochs):
             model = model.cuda()
             criterion = criterion.cuda()
             target = target.cuda()
- 
+            
         scores = model(sentences, sentences_mask, claims, claims_mask)
+        scores_pos = scores[:,0].unsqueeze(1).repeat(1,5)
+        scores_neg = scores[:,1:]
         
-        loss = criterion(scores,target)
+        
+        loss = criterion(scores_pos,scores_neg,target)
         loss.backward()
         optimizer.step()
         total_loss += loss.data[0]
@@ -118,7 +123,8 @@ for ep in range(0,args.epochs):
         claims = claims.long()
         sentences_mask = sentences.gt(0).float()
         claims_mask = claims.gt(0).float()
-        target = torch.cat([positive_scores,negative_scores],0).squeeze()
+#         target = torch.cat([positive_scores,negative_scores],0).squeeze()
+        target = torch.Tensor(sentences.size(0),5).fill_(1)
         if args.cuda:
             sentences = sentences.cuda()
             sentences_mask = sentences_mask.cuda()
@@ -127,8 +133,13 @@ for ep in range(0,args.epochs):
             target = target.cuda()
             model = model.cuda()
             criterion=criterion.cuda()
+        
+        
         scores = model(sentences, sentences_mask, claims, claims_mask)
-        loss = criterion(scores,target)
+        scores_pos = scores[:,0].unsqueeze(1).repeat(1,5)
+        scores_neg = scores[:,1:]
+        
+        loss = criterion(scores_pos,scores_neg,target)
         test_loss += loss.data[0]
     
     print("Test loss {0}".format(test_loss))
@@ -137,4 +148,3 @@ for ep in range(0,args.epochs):
         json.dump(vocab.word2idx, f) 
     
     
-

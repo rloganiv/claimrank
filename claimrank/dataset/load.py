@@ -9,6 +9,7 @@ import random
 from nltk.corpus import stopwords
 import numpy as np
 import torch.utils.data as data
+import spacy
 
 # TODO: Filter out trailing tabs from .pm file.
 PMInstance = namedtuple('PMInstance', ['input_sentence', 'entity_name',
@@ -136,7 +137,10 @@ class PMDataset(data.Dataset):
                 claim_bag = inst.field_name.strip().lower().split()+inst.value.strip().lower().split()
                 for qualifier in inst.qualifiers:
                     for q in qualifier:
-                        claim_bag += q.lower().split()
+                        if 'time' in q:
+                            continue
+                        else:
+                            claim_bag += q.lower().split()
                 
                 claim_bag = set(claim_bag)
                 overlap_scores.append(len(post_modifier_bag.intersection(claim_bag))/float(len(post_modifier_bag)))
@@ -146,7 +150,8 @@ class PMDataset(data.Dataset):
             overlap_scores = np.array(overlap_scores)
             sample_claims = sorted(list(zip(claim_names, claim_values, overlap_scores)),key=lambda x:x[2], reverse=True)
             num_pos_claims = min(len(overlap_scores[overlap_scores>0]),1)
-            num_neg_claims = max(5, len(overlap_scores[overlap_scores==0]))
+#             num_neg_claims = min(5, len(overlap_scores[overlap_scores==0]))
+            num_neg_claims = 5
             if (num_pos_claims==0):
                 #print("No positive claim found for {0}".format(instance.post_modifier))
                 cnt_no_pos+=1
@@ -211,9 +216,10 @@ def make_vocab(path, vocab_size):
             claims = json.loads(line[-1])
             for claim in claims:
                 instance = claim['property']
-                words = instance[0].split(" ") + instance[1].split(" ")
+                words = instance[0].split(" ") + instance[1].split(" ") 
                 for word in words:
-                    dictionary.add_word(word)   
+                    if (not "00:00:00" in word) and (not "+" in word):
+                        dictionary.add_word(word) 
         
         # prune the vocabulary
         dictionary.prune_vocab(k=vocab_size)
