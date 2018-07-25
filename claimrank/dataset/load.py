@@ -146,7 +146,7 @@ class PMDataset(data.Dataset):
             overlap_scores = np.array(overlap_scores)
             sample_claims = sorted(list(zip(claim_names, claim_values, overlap_scores)),key=lambda x:x[2], reverse=True)
             num_pos_claims = min(len(overlap_scores[overlap_scores>0]),1)
-            num_neg_claims = min(1, len(overlap_scores[overlap_scores==0]))
+            num_neg_claims = max(5, len(overlap_scores[overlap_scores==0]))
             if (num_pos_claims==0):
                 #print("No positive claim found for {0}".format(instance.post_modifier))
                 cnt_no_pos+=1
@@ -157,12 +157,19 @@ class PMDataset(data.Dataset):
                 negative_claims = []
                 for i in range(0,num_neg_claims):
                     ind = random.choice(list(neg_pool_claims))
-                    prop, val = list(neg_pool_claims)[ind].split("\t")
-                    negative_claims.append((self.get_indices(prop),self.get_indices(val),0))
-                
+                    prop, val = ind.split("\t")
+                    negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))
             else:
-                negative_claims_ind = np.random.choice(candidate_indices, num_neg_claims)
-                negative_claims = [sample_claims[ind] for ind in negative_claims_ind]
+                if len(candidate_indices)<num_neg_claims:
+                    negative_claims = sample_claims[num_pos_claims:]  
+                    for i in range(0,num_neg_claims-len(candidate_indices)):
+                        ind = random.choice(list(neg_pool_claims))
+                        prop, val = ind.split("\t")
+                        negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))  
+                                                           
+                else:
+                    negative_claims_ind = np.random.choice(candidate_indices, num_neg_claims)
+                    negative_claims = [sample_claims[ind] for ind in negative_claims_ind]
             
             data.append((sentence, post_modifier, positive_claims, negative_claims))
             

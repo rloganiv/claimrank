@@ -1,9 +1,11 @@
 import torch
+import sys
 import torch.nn.functional as F
 import torch.nn as nn
 
-from claimrank.utils import masked_softmax
-
+# from claimrank.utils import masked_softmax
+sys.path.insert(0, './../utils')
+from masked import masked_softmax
 
 class AttentivePoolingNetwork(torch.nn.Module):
     """Attentive pooling network. As described in:

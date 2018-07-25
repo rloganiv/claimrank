@@ -26,7 +26,7 @@ parser.add_argument('--vocab_size', type=int, default=20000,
                     help='lmax vocabulary size')
 parser.add_argument('--batch_size', type=int, default=32,
                     help='size of mini-batch')
-parser.add_argument('--cuda', type=bool, default=True,
+parser.add_argument('--cuda', action='store_true',
                     help='use gpu')
 parser.add_argument('--epochs', type=int, default=50,
                     help='total number of epochs')
@@ -55,7 +55,10 @@ def collate_pm(batch):
     positive_fields = torch.Tensor([[[1]+c_name+[2]+[0]*(corpus_train.maxlen_claim-len(c_name)) for (c_name,_,_) in pc] for pc in positive_claims])
     positive_scores = torch.Tensor([[c_score for (_,_,c_score) in pc] for pc in positive_claims])
     positive_scores.fill_(1)
+    #try:
     negative_fields = torch.Tensor([[[1]+c_name+[2]+[0]*(corpus_train.maxlen_claim-len(c_name)) for (c_name,_,_) in pc] for pc in negative_claims])
+  #  except Exception:
+   #     print("here")
 #     negative_scores = torch.Tensor([[c_score for (_,_,c_score) in pc] for pc in negative_claims])
     negative_scores = positive_scores.clone().fill_(-1)
     
@@ -72,11 +75,12 @@ test_iter = iter(test_data)
 criterion = nn.HingeEmbeddingLoss()
 
 model = AttentivePoolingNetwork(len(vocab.word2idx),100,500)
-optimizer = optim.Adam(model.parameters(),lr=1e-3,betas=(0.9, 0.999))
+optimizer = optim.Adam(model.parameters(),lr=5e-4,betas=(0.9, 0.999))
 
 total_loss = 0
 cnt = 0
 for ep in range(0,args.epochs):
+    model.train()
     for batch in train_data:
         sentences, post_modifier, (positive_fields,positive_scores), (negative_fields,negative_scores) = batch
         claims = torch.cat([positive_fields,negative_fields],1)
@@ -93,7 +97,7 @@ for ep in range(0,args.epochs):
             model = model.cuda()
             criterion = criterion.cuda()
             target = target.cuda()
-
+ 
         scores = model(sentences, sentences_mask, claims, claims_mask)
         
         loss = criterion(scores,target)
@@ -102,9 +106,10 @@ for ep in range(0,args.epochs):
         total_loss += loss.data[0]
         cnt+=1
         
-        if cnt % 100==0:
+        if cnt%100==0:
             print("[{0}/{1}] Average running Loss: {2}".format(cnt,ep,total_loss/float(cnt)))
-            
+ 
+    model.eval()
     test_loss = 0    
     for batch in test_data:
         sentences, post_modifier, (positive_fields,positive_scores), (negative_fields,negative_scores) = batch
@@ -113,15 +118,23 @@ for ep in range(0,args.epochs):
         claims = claims.long()
         sentences_mask = sentences.gt(0).float()
         claims_mask = claims.gt(0).float()
-        scores = model(sentences, sentences_mask, claims, claims_mask)
         target = torch.cat([positive_scores,negative_scores],0).squeeze()
+        if args.cuda:
+            sentences = sentences.cuda()
+            sentences_mask = sentences_mask.cuda()
+            claims = claims.cuda()
+            claims_mask = claims_mask.cuda()
+            target = target.cuda()
+            model = model.cuda()
+            criterion=criterion.cuda()
+        scores = model(sentences, sentences_mask, claims, claims_mask)
         loss = criterion(scores,target)
         test_loss += loss.data[0]
     
     print("Test loss {0}".format(test_loss))
-    torch.save(model.state_dict(), open("./models//model"+str(ep)+".pt", 'wb')) 
-    with open('./vocab.json',encoding='utf-8') as f:
-        json.dump(vocab.dictionary.word2idx, f) 
+    torch.save(model.state_dict(), open("./save_models/model"+str(ep)+".pt", 'wb')) 
+    with open('./vocab.json','w',encoding='utf-8') as f:
+        json.dump(vocab.word2idx, f) 
     
     
 
