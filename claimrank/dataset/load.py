@@ -10,6 +10,7 @@ from nltk.corpus import stopwords
 import numpy as np
 import torch.utils.data as data
 
+
 # TODO: Filter out trailing tabs from .pm file.
 PMInstance = namedtuple('PMInstance', ['input_sentence', 'entity_name',
                                        'post_modifier', 'gold_sentence',
@@ -18,6 +19,7 @@ PMInstance = namedtuple('PMInstance', ['input_sentence', 'entity_name',
 WikiInstance = namedtuple('WikiInstance', ['wiki_id', 'entity_name', 'aliases',
                                            'description', 'claims'])
 Claim = namedtuple('Claim', ['field_name', 'value', 'qualifiers'])
+
 
 def load_pm(filename):
     """Reads a .pm file into a list of PMInstances.
@@ -31,6 +33,7 @@ def load_pm(filename):
         reader = csv.reader(f, delimiter='\t')
         out = [PMInstance(*row) for row in reader]
     return out
+
 
 def load_wiki(filename):
     """Reads a .wiki file into a dictionary whose keys are ``wiki_id``s and
@@ -59,6 +62,7 @@ def load_wiki(filename):
             out[wiki_id] = WikiInstance(wiki_id, entity_name, aliases,
                                         description, processed_claims)
     return out
+
 
 class Dictionary(object):
     def __init__(self):
@@ -99,6 +103,7 @@ class Dictionary(object):
     def __len__(self):
         return len(self.word2idx)
 
+
 class PMDataset(data.Dataset):
     def __init__(self, path, maxlen, vocab):
         self.dictionary = vocab
@@ -111,12 +116,12 @@ class PMDataset(data.Dataset):
         self.pm = load_pm(path + '.pm')
         self.data = self.align_data(self.pm, self.wiki)
         self.maxlen_sent = min(self.maxlen_sent, maxlen)
-        
+
     def get_indices(self, words):
         vocab = self.dictionary.word2idx
         unk_idx = vocab['<oov>']
         return [vocab[w] if w in vocab else unk_idx for w in words]
-        
+
     def align_data(self, pm_data, wiki_data):
         data = []
         cnt_no_pos = 0
@@ -129,7 +134,7 @@ class PMDataset(data.Dataset):
             claim_names = []
             claim_values = []
             overlap_scores = []
-            
+
             for inst in wiki_data[instance.wiki_id].claims:
                 claim_names.append(self.get_indices(inst.field_name.strip().lower().split()))
                 claim_values.append(self.get_indices(inst.value.strip().lower().split()))
@@ -137,12 +142,12 @@ class PMDataset(data.Dataset):
                 for qualifier in inst.qualifiers:
                     for q in qualifier:
                         claim_bag += q.lower().split()
-                
+
                 claim_bag = set(claim_bag)
                 overlap_scores.append(len(post_modifier_bag.intersection(claim_bag))/float(len(post_modifier_bag)))
                 self.maxlen_claim = max(self.maxlen_claim, len(claim_names[-1]))
                 neg_pool_claims.add((inst.field_name.strip().lower()+"\t"+inst.value.strip().lower()))
-                
+
             overlap_scores = np.array(overlap_scores)
             sample_claims = sorted(list(zip(claim_names, claim_values, overlap_scores)),key=lambda x:x[2], reverse=True)
             num_pos_claims = min(len(overlap_scores[overlap_scores>0]),1)
@@ -161,32 +166,31 @@ class PMDataset(data.Dataset):
                     negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))
             else:
                 if len(candidate_indices)<num_neg_claims:
-                    negative_claims = sample_claims[num_pos_claims:]  
+                    negative_claims = sample_claims[num_pos_claims:]
                     for i in range(0,num_neg_claims-len(candidate_indices)):
                         ind = random.choice(list(neg_pool_claims))
                         prop, val = ind.split("\t")
-                        negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))  
-                                                           
+                        negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))
+
                 else:
                     negative_claims_ind = np.random.choice(candidate_indices, num_neg_claims)
                     negative_claims = [sample_claims[ind] for ind in negative_claims_ind]
-            
+
             data.append((sentence, post_modifier, positive_claims, negative_claims))
-            
+
             self.maxlen_sent = max(self.maxlen_sent, len(sentence))
         print("Total #instance with no positive claims {0}".format(cnt_no_pos))
         print("Max length for sentences {0}".format(self.maxlen_sent))
         print("Max length for claim {0}".format(self.maxlen_claim))
         return data
-    
+
     def __getitem__(self, index):
         return self.data[index]
-        
+
     def __len__(self):
         return len(self.data)
-        
-    
-    
+
+
 def make_vocab(path, vocab_size):
     dictionary = Dictionary()
     file_path = os.path.join(path, 'train.pm')
@@ -198,11 +202,9 @@ def make_vocab(path, vocab_size):
             sentence = line[0]
             pm = line[2]
             words = sentence.split(" ") + pm.split(" ")
-                
+
             for word in words:
                 dictionary.add_word(word)
-        
-        
     file_path = os.path.join(path, 'train.wiki')
     assert os.path.exists(file_path)
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -213,20 +215,21 @@ def make_vocab(path, vocab_size):
                 instance = claim['property']
                 words = instance[0].split(" ") + instance[1].split(" ")
                 for word in words:
-                    dictionary.add_word(word)   
-        
+                    dictionary.add_word(word)
+
         # prune the vocabulary
         dictionary.prune_vocab(k=vocab_size)
-#  json.dump(open(path+"/vocab.json", 'w'))
-        
+    # json.dump(open(path+"/vocab.json", 'w'))
+
     return dictionary
-        
+
+
 def batchify(data, bsz, maxlen_sent, maxlen_claim, shuffle=False):
     if shuffle:
         random.shuffle(data)
     nbatch = len(data) // bsz
     batches = []
-    
+
     for i in range(nbatch):
         positive_claims = []
         negative_claims = []
@@ -249,3 +252,4 @@ def batchify(data, bsz, maxlen_sent, maxlen_claim, shuffle=False):
         batches.append((sentence, post_modifier, positive_claims, negative_claims))
 
     return batches
+
