@@ -11,6 +11,7 @@ import numpy as np
 import torch.utils.data as data
 import spacy
 
+
 # TODO: Filter out trailing tabs from .pm file.
 PMInstance = namedtuple('PMInstance', ['input_sentence', 'entity_name',
                                        'post_modifier', 'gold_sentence',
@@ -19,6 +20,11 @@ PMInstance = namedtuple('PMInstance', ['input_sentence', 'entity_name',
 WikiInstance = namedtuple('WikiInstance', ['wiki_id', 'entity_name', 'aliases',
                                            'description', 'claims'])
 Claim = namedtuple('Claim', ['field_name', 'value', 'qualifiers'])
+Instance = namedtuple('Instance', ['input_sentence', 'entity_name',
+                                   'post_modifier', 'gold_sentence',
+                                   'wiki_id', 'previous_sentence',
+                                   'blank', 'claims', 'overlap_scores'])
+
 
 def load_pm(filename):
     """Reads a .pm file into a list of PMInstances.
@@ -32,6 +38,7 @@ def load_pm(filename):
         reader = csv.reader(f, delimiter='\t')
         out = [PMInstance(*row) for row in reader]
     return out
+
 
 def load_wiki(filename):
     """Reads a .wiki file into a dictionary whose keys are ``wiki_id``s and
@@ -60,6 +67,136 @@ def load_wiki(filename):
             out[wiki_id] = WikiInstance(wiki_id, entity_name, aliases,
                                         description, processed_claims)
     return out
+
+
+def merge(pm, wiki):
+    """Merges entries in a .pm and .wiki file into single ``Instance`` tuples.
+
+    Parameters
+    ----------
+    pm : List[PMInstance]
+    wiki : List[WikiInstance]
+
+    Returns
+    -------
+    A list of ``Instances``.
+    """
+    out = []
+    stopword_set = set(stopwords.words('english'))
+    for pm_instance in pm:
+        post_modifier = pm_instance.post_modifier
+        wiki_instance = wiki[pm_instance.wiki_id]
+        claims = wiki_instance.claims
+        overlap_scores = [overlap_score(post_modifier, claim, stopword_set) for claim in claims]
+        instance = Instance(*pm_instance, claims, overlap_scores)
+        out.append(instance)
+    return out
+
+
+# TODO: Fix name conflict for stopwords (affects code below)
+def overlap_score(post_modifier, claim, stopword_set):
+    """Computes the overlap between a post modifier and a claim.
+
+    Overlap score is computed as:
+        intersection(post_modifier, claim) / len(post_modifier)
+
+    Parameters
+    ----------
+    post_modifier : str
+    claim : Claim
+    stopword_set : set
+        Stopwords to filter from ``post_modifier``computing overlap.
+
+    Returns
+    -------
+    overlap_score : float
+    """
+    def _preprocess(string):
+        tokens = string.strip().lower().split()
+        token_set = set(tokens)
+        filtered_token_set = token_set.difference(stopword_set)
+        return filtered_token_set
+    # Extract set of relevant tokens in post modifier
+    post_modifier_set = _preprocess(post_modifier)
+
+    # Extract set of relevant tokens from claim
+    claim_set = set()
+    claim_set.update(_preprocess(claim.field_name))
+    claim_set.update(_preprocess(claim.value))
+    for qualifier in claim.qualifiers:
+        qualifier_string = ' '.join(qualifier)
+        claim_set.update(_preprocess(qualifier_string))
+
+    # Compute and return overlap score
+    overlap_score = len(post_modifier_set.intersection(claim_set))/len(post_modifier_set)
+    return overlap_score
+
+
+def pad(input, pad_value=0):
+    if isinstance(input[0][0], list):
+        outer_max_len = max(len(x) for x in input)
+        inner_max_len = max(len(y) for x in input for y in x)
+        padded = []
+        for outer_seq in input:
+            if len(outer_seq) < outer_max_len:
+                for _ in range(outer_max_len - len(outer_seq)):
+                    outer_seq.append([])
+            entry = []
+            for inner_seq in outer_seq:
+                entry.append(inner_seq + [pad_value]*(inner_max_len - len(inner_seq)))
+            padded.append(entry)
+    else:
+        max_len = max(len(x) for x in input)
+        padded = [x + [pad_value]*(max_len - len(x)) for x in input]
+    return padded
+
+
+def batch_collate_fn(batch):
+    inputs, claims, scores, pms = zip(*batch)
+    inputs = torch.tensor(pad(inputs))
+    claims = torch.tensor(pad(claims))
+    scores = torch.tensor(pad(scores))
+    pms = torch.tensor(pad(pms))
+    return inputs, claims, scores, pms
+
+
+class SimplePMDataset(data.Dataset):
+    def __init__(self, prefix, vocab, maxlen=300):
+        """A simplified post modifier data loader.
+
+        Parameters
+        ----------
+        prefix : str
+            Path to .pm and .wiki file
+        vocab : Dictionary
+            Vocabulary for mapping tokens to ids.
+        maxlen : int, optional
+            Maximum number of tokens.
+        """
+        self._prefix = prefix
+        self._vocab = vocab
+        self._maxlen = maxlen
+
+        pm = load_pm(prefix + '.pm')
+        wiki = load_wiki(prefix + '.wiki')
+        self._data = merge(pm, wiki)
+
+    def __getitem__(self, i):
+        instance = self._data[i]
+        sentence = self._vocab.map_sentence(instance.input_sentence)
+        if len(sentence) > self._maxlen:
+            sentence = sentence[:self._maxlen]
+        claims = [claim.field_name + ' ' + claim.value for claim in instance.claims]
+        claims = [self._vocab.map_sentence(claim) for claim in claims]
+        scores = [1 if x > 0 else 0 for x in instance.overlap_scores]
+        post_modifier = self._vocab.map_sentence(instance.post_modifier)
+        if len(post_modifier) > self._maxlen:
+            post_modifier = post_modifier[:self._maxlen]
+        return sentence, claims, scores, post_modifier
+
+    def __len__(self):
+        return len(self._data)
+
 
 class Dictionary(object):
     def __init__(self):
@@ -100,6 +237,14 @@ class Dictionary(object):
     def __len__(self):
         return len(self.word2idx)
 
+    def map_sentence(self, sentence):
+        tokens = sentence.strip().lower().split()
+        unk_idx = self.word2idx['<oov>']
+        ids = [self.word2idx[x] if x in self.word2idx else unk_idx for x in tokens]
+        ids = [self.word2idx['<sos>']] + ids + [self.word2idx['<eos>']]
+        return ids
+
+
 class PMDataset(data.Dataset):
     def __init__(self, path, maxlen, vocab):
         self.dictionary = vocab
@@ -112,12 +257,12 @@ class PMDataset(data.Dataset):
         self.pm = load_pm(path + '.pm')
         self.data = self.align_data(self.pm, self.wiki)
         self.maxlen_sent = min(self.maxlen_sent, maxlen)
-        
+
     def get_indices(self, words):
         vocab = self.dictionary.word2idx
         unk_idx = vocab['<oov>']
         return [vocab[w] if w in vocab else unk_idx for w in words]
-        
+
     def align_data(self, pm_data, wiki_data):
         data = []
         cnt_no_pos = 0
@@ -130,7 +275,7 @@ class PMDataset(data.Dataset):
             claim_names = []
             claim_values = []
             overlap_scores = []
-            
+
             for inst in wiki_data[instance.wiki_id].claims:
                 claim_names.append(self.get_indices(inst.field_name.strip().lower().split()))
                 claim_values.append(self.get_indices(inst.value.strip().lower().split()))
@@ -141,12 +286,11 @@ class PMDataset(data.Dataset):
                             continue
                         else:
                             claim_bag += q.lower().split()
-                
                 claim_bag = set(claim_bag)
                 overlap_scores.append(len(post_modifier_bag.intersection(claim_bag))/float(len(post_modifier_bag)))
                 self.maxlen_claim = max(self.maxlen_claim, len(claim_names[-1]))
                 neg_pool_claims.add((inst.field_name.strip().lower()+"\t"+inst.value.strip().lower()))
-                
+
             overlap_scores = np.array(overlap_scores)
             sample_claims = sorted(list(zip(claim_names, claim_values, overlap_scores)),key=lambda x:x[2], reverse=True)
             num_pos_claims = min(len(overlap_scores[overlap_scores>0]),1)
@@ -166,32 +310,31 @@ class PMDataset(data.Dataset):
                     negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))
             else:
                 if len(candidate_indices)<num_neg_claims:
-                    negative_claims = sample_claims[num_pos_claims:]  
+                    negative_claims = sample_claims[num_pos_claims:]
                     for i in range(0,num_neg_claims-len(candidate_indices)):
                         ind = random.choice(list(neg_pool_claims))
                         prop, val = ind.split("\t")
-                        negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))  
-                                                           
+                        negative_claims.append((self.get_indices(prop.split()),self.get_indices(val.split()),0))
+
                 else:
                     negative_claims_ind = np.random.choice(candidate_indices, num_neg_claims)
                     negative_claims = [sample_claims[ind] for ind in negative_claims_ind]
-            
+
             data.append((sentence, post_modifier, positive_claims, negative_claims))
-            
+
             self.maxlen_sent = max(self.maxlen_sent, len(sentence))
         print("Total #instance with no positive claims {0}".format(cnt_no_pos))
         print("Max length for sentences {0}".format(self.maxlen_sent))
         print("Max length for claim {0}".format(self.maxlen_claim))
         return data
-    
+
     def __getitem__(self, index):
         return self.data[index]
-        
+
     def __len__(self):
         return len(self.data)
-        
-    
-    
+
+
 def make_vocab(path, vocab_size):
     dictionary = Dictionary()
     file_path = os.path.join(path, 'train.pm')
@@ -203,11 +346,9 @@ def make_vocab(path, vocab_size):
             sentence = line[0]
             pm = line[2]
             words = sentence.split(" ") + pm.split(" ")
-                
+
             for word in words:
                 dictionary.add_word(word)
-        
-        
     file_path = os.path.join(path, 'train.wiki')
     assert os.path.exists(file_path)
     with open(file_path, 'r', encoding='utf-8') as f:
@@ -220,19 +361,19 @@ def make_vocab(path, vocab_size):
                 for word in words:
                     if (not "00:00:00" in word) and (not "+" in word):
                         dictionary.add_word(word) 
-        
         # prune the vocabulary
         dictionary.prune_vocab(k=vocab_size)
-#  json.dump(open(path+"/vocab.json", 'w'))
-        
+    # json.dump(open(path+"/vocab.json", 'w'))
+
     return dictionary
-        
+
+
 def batchify(data, bsz, maxlen_sent, maxlen_claim, shuffle=False):
     if shuffle:
         random.shuffle(data)
     nbatch = len(data) // bsz
     batches = []
-    
+
     for i in range(nbatch):
         positive_claims = []
         negative_claims = []
@@ -255,3 +396,4 @@ def batchify(data, bsz, maxlen_sent, maxlen_claim, shuffle=False):
         batches.append((sentence, post_modifier, positive_claims, negative_claims))
 
     return batches
+
