@@ -363,37 +363,8 @@ def make_vocab(path, vocab_size):
                         dictionary.add_word(word) 
         # prune the vocabulary
         dictionary.prune_vocab(k=vocab_size)
-    # json.dump(open(path+"/vocab.json", 'w'))
+    
 
     return dictionary
 
-
-def batchify(data, bsz, maxlen_sent, maxlen_claim, shuffle=False):
-    if shuffle:
-        random.shuffle(data)
-    nbatch = len(data) // bsz
-    batches = []
-
-    for i in range(nbatch):
-        positive_claims = []
-        negative_claims = []
-        post_modifier = []
-        sentences = []
-        # Pad batches to maximum sequence length in batch
-        for sample in data[i*bsz:(i+1)*bsz]:
-            sentences.append(sample[0])
-            post_modifier.append(sample[1])
-            positive_claims.append(sample[2])
-            negative_claims.append(sample[3])
-        sentences = [[1]+sentence+[2]+[0]*maxlen_sent for sentence in sentences]
-        sentences = [sentence[:maxlen_sent] for sentence in sentences]
-        sentences = torch.cat(0,sentences)
-        positive_claims = zip(*[[1]+c_name+[2]+[0]*maxlen_claim for (c_name,c_value,c_score) in positive_claims])
-        positive_claims = (torch.cat(0,positive_claims[0]), torch.cat(0,positive_claims[1]), torch.cat(0,positive_claims[2]))
-        negative_claims = zip(*[[1]+c_name+[2]+[0]*maxlen_claim for (c_name,c_value,c_score) in negative_claims])
-        negative_claims = (torch.cat(0,negative_claims[0]), torch.cat(0,negative_claims[1]), torch.cat(0,negative_claims[2]))
-        post_modifier = [[1]+pm+[2]+[0]*maxlen_claim for pm in post_modifier]
-        batches.append((sentence, post_modifier, positive_claims, negative_claims))
-
-    return batches
 
