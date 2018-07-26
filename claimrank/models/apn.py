@@ -32,6 +32,7 @@ class AttentivePoolingNetwork(torch.nn.Module):
                                                   kernel_size=(1, embedding_dim))
         self._bilinear_fc = torch.nn.Linear(num_filters,
                                             num_filters)
+        self._ultimate_fc = torch.nn.Linear(num_filters, embedding_dim)
 
     def forward(self, sentences, sentence_masks, claims, claim_masks):
         """Computes the forward pass of the baseline model.
@@ -59,6 +60,9 @@ class AttentivePoolingNetwork(torch.nn.Module):
         _batch_size, num_claims, claim_length = claims.shape
         assert batch_size == _batch_size, "Batch sizes do not match"
 
+        # Get outer mask
+        outer_mask = claim_masks.sum(-1).ne(0).float()
+
         # Embed and flatten sentences / sentence_masks, tile to match claims
         embedded_sentences = self._embedding(sentences)
         embedded_sentences.unsqueeze_(1)
@@ -71,14 +75,12 @@ class AttentivePoolingNetwork(torch.nn.Module):
         sentence_masks = sentence_masks.repeat(1, num_claims, 1)
         sentence_masks = sentence_masks.view(-1, sentence_length)
 
-
         # Embed and flatten claims / claim_masks
         claims = claims.view(-1, claim_length)
         embedded_claims = self._embedding(claims)
         embedded_claims.unsqueeze_(1) # Dummy 'channels' dim
 
         claim_masks = claim_masks.view(-1, claim_length)
-
 
         # Apply convolutions
         convolved_sentences = self._sentence_convolution(embedded_sentences)
@@ -105,11 +107,15 @@ class AttentivePoolingNetwork(torch.nn.Module):
         encoded_claims = claim_attention.unsqueeze(1) * convolved_claims
         encoded_claims = encoded_claims.sum(-1)
 
-        # Concatenate encogings
-        encoded = torch.cat((encoded_sentences, encoded_claims), -1)
-
-        # Compute scores
+        # Compute scores / outer attention
         scores = F.cosine_similarity(encoded_sentences, encoded_claims)
         scores = scores.view(batch_size, num_claims)
+        outer_attention = masked_softmax(scores, outer_mask)
+
+        # Apply attention to claims
+        encoded_claims = encoded_claims.view(batch_size, num_claims, -1)
+        encoded = outer_attention.unsqueeze(2) * encoded_claims
+        encoded = encoded.sum(1)
+        encoded = self._ultimate_fc(encoded)
 
         return scores, encoded
