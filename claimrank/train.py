@@ -75,6 +75,10 @@ test_iter = iter(test_data)
 criterion = nn.MarginRankingLoss()
 
 model = AttentivePoolingNetwork(len(vocab.word2idx),100,500)
+wgts = torch.load('pretrained.pt')
+wgts[0].fill_(0)
+model._embedding.from_pretrained(wgts)
+
 optimizer = optim.Adam(model.parameters(),lr=5e-4,betas=(0.9, 0.999))
 
 total_loss = 0
