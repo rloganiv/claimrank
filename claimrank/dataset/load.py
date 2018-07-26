@@ -9,6 +9,7 @@ import random
 from nltk.corpus import stopwords
 import numpy as np
 import torch.utils.data as data
+import spacy
 
 
 # TODO: Filter out trailing tabs from .pm file.
@@ -281,8 +282,10 @@ class PMDataset(data.Dataset):
                 claim_bag = inst.field_name.strip().lower().split()+inst.value.strip().lower().split()
                 for qualifier in inst.qualifiers:
                     for q in qualifier:
-                        claim_bag += q.lower().split()
-
+                        if 'time' in q:
+                            continue
+                        else:
+                            claim_bag += q.lower().split()
                 claim_bag = set(claim_bag)
                 overlap_scores.append(len(post_modifier_bag.intersection(claim_bag))/float(len(post_modifier_bag)))
                 self.maxlen_claim = max(self.maxlen_claim, len(claim_names[-1]))
@@ -291,7 +294,8 @@ class PMDataset(data.Dataset):
             overlap_scores = np.array(overlap_scores)
             sample_claims = sorted(list(zip(claim_names, claim_values, overlap_scores)),key=lambda x:x[2], reverse=True)
             num_pos_claims = min(len(overlap_scores[overlap_scores>0]),1)
-            num_neg_claims = max(5, len(overlap_scores[overlap_scores==0]))
+#             num_neg_claims = min(5, len(overlap_scores[overlap_scores==0]))
+            num_neg_claims = 5
             if (num_pos_claims==0):
                 #print("No positive claim found for {0}".format(instance.post_modifier))
                 cnt_no_pos+=1
@@ -353,43 +357,14 @@ def make_vocab(path, vocab_size):
             claims = json.loads(line[-1])
             for claim in claims:
                 instance = claim['property']
-                words = instance[0].split(" ") + instance[1].split(" ")
+                words = instance[0].split(" ") + instance[1].split(" ") 
                 for word in words:
-                    dictionary.add_word(word)
-
+                    if (not "00:00:00" in word) and (not "+" in word):
+                        dictionary.add_word(word) 
         # prune the vocabulary
         dictionary.prune_vocab(k=vocab_size)
-    # json.dump(open(path+"/vocab.json", 'w'))
+    
 
     return dictionary
 
-
-def batchify(data, bsz, maxlen_sent, maxlen_claim, shuffle=False):
-    if shuffle:
-        random.shuffle(data)
-    nbatch = len(data) // bsz
-    batches = []
-
-    for i in range(nbatch):
-        positive_claims = []
-        negative_claims = []
-        post_modifier = []
-        sentences = []
-        # Pad batches to maximum sequence length in batch
-        for sample in data[i*bsz:(i+1)*bsz]:
-            sentences.append(sample[0])
-            post_modifier.append(sample[1])
-            positive_claims.append(sample[2])
-            negative_claims.append(sample[3])
-        sentences = [[1]+sentence+[2]+[0]*maxlen_sent for sentence in sentences]
-        sentences = [sentence[:maxlen_sent] for sentence in sentences]
-        sentences = torch.cat(0,sentences)
-        positive_claims = zip(*[[1]+c_name+[2]+[0]*maxlen_claim for (c_name,c_value,c_score) in positive_claims])
-        positive_claims = (torch.cat(0,positive_claims[0]), torch.cat(0,positive_claims[1]), torch.cat(0,positive_claims[2]))
-        negative_claims = zip(*[[1]+c_name+[2]+[0]*maxlen_claim for (c_name,c_value,c_score) in negative_claims])
-        negative_claims = (torch.cat(0,negative_claims[0]), torch.cat(0,negative_claims[1]), torch.cat(0,negative_claims[2]))
-        post_modifier = [[1]+pm+[2]+[0]*maxlen_claim for pm in post_modifier]
-        batches.append((sentence, post_modifier, positive_claims, negative_claims))
-
-    return batches
 

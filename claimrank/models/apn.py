@@ -110,5 +110,6 @@ class AttentivePoolingNetwork(torch.nn.Module):
 
         # Compute scores
         scores = F.cosine_similarity(encoded_sentences, encoded_claims)
+        scores = scores.view(batch_size, num_claims)
 
         return scores, encoded
