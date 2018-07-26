@@ -1,5 +1,4 @@
 import torch
-import sys
 import torch.nn.functional as F
 
 from claimrank.utils import masked_softmax
@@ -14,9 +13,7 @@ class AttentivePoolingNetwork(torch.nn.Module):
     ----------
     vocab_size : int
     embedding_dim : int
-    num_sentence_filters : int
-    num_claim_filters : int
-    num_layers : int
+    num_filters : int
     """
     def __init__(self,
                  vocab_size,
@@ -52,8 +49,10 @@ class AttentivePoolingNetwork(torch.nn.Module):
 
         Returns
         -------
-        scores : torch.Tensor(shape=(batch_size, num_claims))
+        scores : torch.Tensor(shape=(batch_size * num_claims))
             The claim scores.
+        encoded : torch.Tensor(shape=(batch_size * num_claims, 2 * embedding_dimembedding_dim))
+            The encoded sentence/claim pairs.
         """
         # Get relevant dimensions
         batch_size, sentence_length = sentences.shape
@@ -106,9 +105,11 @@ class AttentivePoolingNetwork(torch.nn.Module):
         encoded_claims = claim_attention.unsqueeze(1) * convolved_claims
         encoded_claims = encoded_claims.sum(-1)
 
+        # Concatenate encogings
+        encoded = torch.cat((encoded_sentences, encoded_claims), -1)
+
         # Compute scores
         scores = F.cosine_similarity(encoded_sentences, encoded_claims)
         scores = scores.view(batch_size, num_claims)
 
-        return scores
-
+        return scores, encoded
