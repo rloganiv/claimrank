@@ -17,11 +17,19 @@ class Decoder(nn.Module):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.ntokens = ntokens
+        self.embedding = nn.Embedding(ntokens, input_dim)
+        self.hidden_to_vocab = nn.Linear(hidden_dim, ntokens)
         self.decoder = nn.LSTM(input_size=input_dim,
                                hidden_size=hidden_dim,
                                num_layers=1,
                                dropout=dropout,
                                batch_first=True)
+        self.init_weights()
+        
+    def init_weights(self):
+        initrange = 0.1
+        self.hidden_to_vocab.weight.data.uniform_(-initrange, initrange)
+        self.hidden_to_vocab.bias.data.fill_(0)
         
     def init_hidden(self, bsz):
         zeros1 = torch.zeros(1, bsz, self.hidden_dim)
