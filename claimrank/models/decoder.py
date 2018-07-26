@@ -19,7 +19,7 @@ class Decoder(nn.Module):
         self.ntokens = ntokens
         self.embedding = nn.Embedding(ntokens, input_dim)
         self.hidden_to_vocab = nn.Linear(hidden_dim, ntokens)
-        self.decoder = nn.LSTM(input_size=input_dim,
+        self.decoder = nn.LSTM(input_size=input_dim+hidden_dim,
                                hidden_size=hidden_dim,
                                num_layers=1,
                                batch_first=True)
@@ -31,8 +31,8 @@ class Decoder(nn.Module):
         self.hidden_to_vocab.bias.data.fill_(0)
         
     def init_hidden(self, bsz):
-        zeros1 = torch.zeros(1, bsz, self.hidden_dim+self.input_dim)
-        zeros2 = torch.zeros(1, bsz, self.hidden_dim+self.input_dim)
+        zeros1 = torch.zeros(1, bsz, self.hidden_dim)
+        zeros2 = torch.zeros(1, bsz, self.hidden_dim)
         return  (zeros1, zeros2)
         
     def forward(self, hidden, target):
@@ -44,14 +44,14 @@ class Decoder(nn.Module):
         embeddings = self.embedding(target)
         augmented_embeddings = torch.cat([embeddings, all_hidden], 2)
         
-        lengths = [len(t.gt(0)) for t in target]
+        lengths = [int(len(t.gt(0))) for t in target]
         lengths, sorted_indices = torch.sort(torch.Tensor(lengths), 0, descending=True)
         embeddings = torch.index_select(embeddings, 0, sorted_indices)
         lengths = lengths.tolist()
-        
-        packed_embeddings = pack_padded_sequence(input=augmented_embeddings,
-                                                 lengths=lengths,
-                                                 batch_first=True)
+
+        print(lengths)
+        print(augmented_embeddings.size())        
+        packed_embeddings = pack_padded_sequence(augmented_embeddings,lengths,batch_first=True)
    
         packed_output, state = self.decoder(packed_embeddings, state)
         output, lengths = pad_packed_sequence(packed_output, batch_first=True)
