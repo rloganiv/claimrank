@@ -119,3 +119,4 @@ class AttentivePoolingNetwork(torch.nn.Module):
         encoded = self._ultimate_fc(encoded)
 
         return scores, encoded
+
