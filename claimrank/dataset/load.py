@@ -245,7 +245,7 @@ class Dictionary(object):
 
 
 class PMDataset(data.Dataset):
-    def __init__(self, path, maxlen, vocab, train=False):
+    def __init__(self, path, maxlen, vocab, train=True):
         self.dictionary = vocab
         self.maxlen = maxlen
         self.maxlen_sent = 0
@@ -322,8 +322,10 @@ class PMDataset(data.Dataset):
                     negative_claims_ind = np.random.choice(candidate_indices, num_neg_claims)
                     negative_claims = [sample_claims[ind] for ind in negative_claims_ind]
 
-            data.append((sentence, post_modifier, positive_claims, negative_claims))
-
+            if self.train:
+                data.append((sentence, post_modifier, positive_claims, negative_claims))
+            else:
+                data.append((sentence, post_modifier, sample_claims, []))
             self.maxlen_sent = max(self.maxlen_sent, len(sentence))
             
         print("Total #instance with no positive claims {0}".format(cnt_no_pos))
