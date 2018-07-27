@@ -9,7 +9,6 @@ import random
 from nltk.corpus import stopwords
 import numpy as np
 import torch.utils.data as data
-import spacy
 
 
 # TODO: Filter out trailing tabs from .pm file.
@@ -246,17 +245,19 @@ class Dictionary(object):
 
 
 class PMDataset(data.Dataset):
-    def __init__(self, path, maxlen, vocab):
+    def __init__(self, path, maxlen, vocab, train=False):
         self.dictionary = vocab
         self.maxlen = maxlen
         self.maxlen_sent = 0
         self.maxlen_claim = 0
         self.path = path
+        self.train = train
         self.stopwords = stopwords.words('english')
-        self.wiki = load_wiki(path + '.wiki')
+        self.wiki = load_wiki(path + '.tok.wiki')
         self.pm = load_pm(path + '.pm')
         self.data = self.align_data(self.pm, self.wiki)
         self.maxlen_sent = min(self.maxlen_sent, maxlen)
+        self.maxlen_pm = 50
 
     def get_indices(self, words):
         vocab = self.dictionary.word2idx
@@ -282,10 +283,11 @@ class PMDataset(data.Dataset):
                 claim_bag = inst.field_name.strip().lower().split()+inst.value.strip().lower().split()
                 for qualifier in inst.qualifiers:
                     for q in qualifier:
-                        if 'time' in q:
+                        if 'time' in q or '+' in q:
                             continue
                         else:
                             claim_bag += q.lower().split()
+                            claim_names[-1] += self.get_indices(q.strip().lower().split()) + self.get_indices(q.strip().lower().split())
                 claim_bag = set(claim_bag)
                 overlap_scores.append(len(post_modifier_bag.intersection(claim_bag))/float(len(post_modifier_bag)))
                 self.maxlen_claim = max(self.maxlen_claim, len(claim_names[-1]))
@@ -323,6 +325,7 @@ class PMDataset(data.Dataset):
             data.append((sentence, post_modifier, positive_claims, negative_claims))
 
             self.maxlen_sent = max(self.maxlen_sent, len(sentence))
+            
         print("Total #instance with no positive claims {0}".format(cnt_no_pos))
         print("Max length for sentences {0}".format(self.maxlen_sent))
         print("Max length for claim {0}".format(self.maxlen_claim))
@@ -361,10 +364,16 @@ def make_vocab(path, vocab_size):
                 for word in words:
                     if (not "00:00:00" in word) and (not "+" in word):
                         dictionary.add_word(word) 
-        # prune the vocabulary
-        dictionary.prune_vocab(k=vocab_size)
+                for qualifier in claim['qualifiers']:
+                    if 'time' in qualifier[0] or '+' in qualifier[1]:
+                        continue
+                    else:
+                        words = qualifier[0].split(" ") + qualifier[1].split(" ") 
+                        for word in words:
+                            dictionary.add_word(word) 
+    # prune the vocabulary
+    dictionary.prune_vocab(k=vocab_size)
     
-
     return dictionary
 
 
