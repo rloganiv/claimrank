@@ -40,30 +40,49 @@ class Decoder(nn.Module):
             zeros2 = zeros2.cuda()
         return (zeros1, zeros2)
 
-    def forward(self, hidden, target):
-        batch_size, seq_len = target.size()
+    def forward(self, hidden, target=None):
+        if target is not None:
+            batch_size, seq_len = target.size()
 
-        state = self.init_hidden(batch_size)
-        all_hidden = hidden.unsqueeze(1).repeat(1, seq_len, 1)
+            state = self.init_hidden(batch_size)
+            all_hidden = hidden.unsqueeze(1).repeat(1, seq_len, 1)
 
-        embeddings = self.embedding(target)
-        augmented_embeddings = torch.cat((embeddings, all_hidden), -1)
+            embeddings = self.embedding(target)
+            augmented_embeddings = torch.cat((embeddings, all_hidden), -1)
 
-        lengths = [int(len(t.gt(0))) for t in target]
-        lengths, sorted_indices = torch.sort(torch.tensor(lengths, device=hidden.device),
-                                             descending=True)
-        _, unsorted_indices = torch.sort(sorted_indices)
-        lengths = lengths.tolist()
-        augmented_embeddings = augmented_embeddings[sorted_indices]
+            lengths = [int(len(t.gt(0))) for t in target]
+            lengths, sorted_indices = torch.sort(torch.tensor(lengths, device=hidden.device),
+                                                 descending=True)
+            _, unsorted_indices = torch.sort(sorted_indices)
+            lengths = lengths.tolist()
+            augmented_embeddings = augmented_embeddings[sorted_indices]
 
-        packed = pack_padded_sequence(augmented_embeddings, lengths, batch_first=True)
-        rnn_out, _ = self.decoder(packed, state)
-        unpacked, _ = pad_packed_sequence(rnn_out, batch_first=True)
+            packed = pack_padded_sequence(augmented_embeddings, lengths, batch_first=True)
+            rnn_out, _ = self.decoder(packed, state)
+            unpacked, _ = pad_packed_sequence(rnn_out, batch_first=True)
 
-        logits = self.hidden_to_vocab(unpacked)
-        logp = F.log_softmax(logits, dim=-1)
+            logits = self.hidden_to_vocab(unpacked)
+            logp = F.log_softmax(logits, dim=-1)
 
-        logp = logp[unsorted_indices]
+            logp = logp[unsorted_indices]
+
+        else:
+            batch_size = hidden.shape[0]
+            hidden = hidden.unsqueeze(1)
+            state = self.init_hidden(batch_size)
+            logp = torch.zeros(batch_size, 10, self.ntokens,
+                               device=hidden.device)
+            x = torch.ones(batch_size, 1, dtype=torch.long,
+                           device=hidden.device)
+            for i in range(10):
+                embeddings = self.embedding(x)
+                augmented_embeddings = torch.cat((embeddings, hidden), -1)
+                packed = pack_padded_sequence(augmented_embeddings, [1], batch_first=True)
+                rnn_out, state = self.decoder(packed, state)
+                unpacked, _ = pad_packed_sequence(rnn_out, batch_first=True)
+                logits = self.hidden_to_vocab(unpacked).squeeze(1)
+                logp[:,i,:] = F.log_softmax(logits, dim=-1)
+                x = x.detach()
 
         return logp
 

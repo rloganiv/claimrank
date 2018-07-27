@@ -26,10 +26,10 @@ class AttentivePoolingNetwork(torch.nn.Module):
         self._embedding = torch.nn.Embedding(vocab_size, embedding_dim)
         self._sentence_convolution = torch.nn.Conv2d(in_channels=1,
                                                      out_channels=num_filters,
-                                                     kernel_size=(1, embedding_dim))
+                                                     kernel_size=(3, embedding_dim))
         self._claim_convolution = torch.nn.Conv2d(in_channels=1,
                                                   out_channels=num_filters,
-                                                  kernel_size=(1, embedding_dim))
+                                                  kernel_size=(3, embedding_dim))
         self._bilinear_fc = torch.nn.Linear(num_filters,
                                             num_filters)
         self._ultimate_fc = torch.nn.Linear(num_filters, embedding_dim)
@@ -95,11 +95,11 @@ class AttentivePoolingNetwork(torch.nn.Module):
 
         # Pool to get attention over words in sentence
         pooled1, _ = transformed.max(dim=1)
-        sentence_attention = masked_softmax(pooled1, sentence_masks)
+        sentence_attention = masked_softmax(pooled1, sentence_masks[:,:-2])
 
         # Pool to get attention over claims
         pooled2, _ = transformed.max(dim=2)
-        claim_attention = masked_softmax(pooled2, claim_masks)
+        claim_attention = masked_softmax(pooled2, claim_masks[:,:-2])
 
         # Apply attention
         encoded_sentences = sentence_attention.unsqueeze(1) * convolved_sentences

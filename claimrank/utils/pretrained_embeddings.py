@@ -32,6 +32,7 @@ def main(_):
     weights = weights_from_glove(vocab,
                                  FLAGS.embedding_file,
                                  FLAGS.embedding_size)
+    torch.save(weights, 'embeddings.pt')
     print(weights)
 
 

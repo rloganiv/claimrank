@@ -31,6 +31,9 @@ parser.add_argument('--epochs', type=int, default=50,
 args = parser.parse_args()
 
 vocab = make_vocab(args.data_path, args.vocab_size)
+with open('./vocab.json','w',encoding='utf-8') as f:
+    json.dump(vocab.word2idx, f)
+
 # create corpus
 corpus_train = PMDataset(vocab=vocab, maxlen=args.maxlen, path=args.data_path+"/train")
 corpus_test = PMDataset(vocab=vocab, maxlen=args.maxlen, path=args.data_path+"/valid")
@@ -59,8 +62,8 @@ def collate_pm(batch):
 #     negative_scores = torch.Tensor([[c_score for (_,_,c_score) in pc] for pc in negative_claims])
     negative_scores = positive_scores.clone().fill_(-1)
     
-    post_modifier = [[1]+pm+[2]+[0]*corpus_train.maxlen_claim for pm in post_modifier]
-    post_modifier = [pm[:corpus_train.maxlen_claim] for pm in post_modifier]
+    post_modifier = [[1]+pm+[2]+[0]*10 for pm in post_modifier]
+    post_modifier = [pm[:10] for pm in post_modifier]
     post_modifier = torch.Tensor(post_modifier)
     
     return (sentences, post_modifier, (positive_fields,positive_scores), (negative_fields,negative_scores))
@@ -74,9 +77,9 @@ criterion = nn.NLLLoss(ignore_index=0, size_average=False)
 
 encoder = AttentivePoolingNetwork(len(vocab.word2idx),1024,1024)
 decoder = Decoder(1024,1024,len(vocab.word2idx),0.0)
-# wgts = torch.load('pretrained.pt')
-# wgts[0].fill_(0)
-# encoder._embedding.from_pretrained(wgts)
+wgts = torch.load('embeddings.pt')
+wgts[0].fill_(0)
+encoder._embedding.from_pretrained(wgts)
 
 encoder_optimizer = optim.Adam(encoder.parameters(),lr=3e-6,betas=(0.9, 0.999))
 decoder_optimizer = optim.Adam(decoder.parameters(),lr=3e-6,betas=(0.9, 0.999))
@@ -110,19 +113,16 @@ for ep in range(0,args.epochs):
 
         decoded = decoder(hidden, post_modifier[:,:-1])
 
-        if cnt % 2:
-            loss = F.margin_ranking_loss(scores_pos, scores_neg, target)
-        else:
-            loss = criterion(decoded.view(-1, decoder.ntokens),
-                             post_modifier[:,1:].contiguous().view(-1))
-            total_loss += loss.data[0]
+        loss = criterion(decoded.view(-1, decoder.ntokens),
+                         post_modifier[:,1:].contiguous().view(-1))
+        total_loss += loss.data[0]
         cnt+=1
         loss.backward()
         encoder_optimizer.step()
         decoder_optimizer.step()
 
         if cnt%100==0:
-            print("[{0}/{1}] Average running Loss: {2}".format(cnt,ep,2*total_loss/float(cnt)))
+            print("[{0}/{1}] Average running Loss: {2}".format(cnt,ep,total_loss/float(cnt)))
 
     print("==Train decodings==")
     for pred in decoded:
@@ -165,8 +165,6 @@ for ep in range(0,args.epochs):
     print('Predicted scores')
     print(scores)
     print("Test loss {0}".format(test_loss))
-    torch.save(encoder.state_dict(), open("./trained_models/encoder"+str(ep)+".pt", 'wb'))
-    torch.save(decoder.state_dict(), open("./trained_models/decoder"+str(ep)+".pt", 'wb'))
-    with open('./vocab.json','w',encoding='utf-8') as f:
-        json.dump(vocab.word2idx, f)
+    torch.save(encoder.state_dict(), open("./trained_models/no_alt_encoder"+str(ep)+".pt", 'wb'))
+    torch.save(decoder.state_dict(), open("./trained_models/no_alt_decoder"+str(ep)+".pt", 'wb'))
 

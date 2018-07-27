@@ -152,12 +152,12 @@ def pad(input, pad_value=0):
 
 
 def batch_collate_fn(batch):
-    inputs, claims, scores, pms = zip(*batch)
+    inputs, claims, scores, pms, meta = zip(*batch)
     inputs = torch.tensor(pad(inputs))
     claims = torch.tensor(pad(claims))
     scores = torch.tensor(pad(scores))
     pms = torch.tensor(pad(pms))
-    return inputs, claims, scores, pms
+    return inputs, claims, scores, pms, meta
 
 
 class SimplePMDataset(data.Dataset):
@@ -192,7 +192,7 @@ class SimplePMDataset(data.Dataset):
         post_modifier = self._vocab.map_sentence(instance.post_modifier)
         if len(post_modifier) > self._maxlen:
             post_modifier = post_modifier[:self._maxlen]
-        return sentence, claims, scores, post_modifier
+        return sentence, claims, scores, post_modifier, instance
 
     def __len__(self):
         return len(self._data)
@@ -253,7 +253,7 @@ class PMDataset(data.Dataset):
         self.maxlen_claim = 0
         self.path = path
         self.stopwords = stopwords.words('english')
-        self.wiki = load_wiki(path + '.wiki')
+        self.wiki = load_wiki(path + '.tok.wiki')
         self.pm = load_pm(path + '.pm')
         self.data = self.align_data(self.pm, self.wiki)
         self.maxlen_sent = min(self.maxlen_sent, maxlen)
@@ -363,8 +363,6 @@ def make_vocab(path, vocab_size):
                         dictionary.add_word(word) 
         # prune the vocabulary
         dictionary.prune_vocab(k=vocab_size)
-    
 
     return dictionary
-
 
