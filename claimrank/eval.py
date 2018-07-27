@@ -2,6 +2,7 @@ import argparse
 import json
 import sys
 import torch
+import numpy as np
 from torch.utils.data import DataLoader
 
 from claimrank.dataset import SimplePMDataset, batch_collate_fn, make_vocab
@@ -30,6 +31,8 @@ def main(_):
                              collate_fn=batch_collate_fn,
                              shuffle=False)
 
+    total=0
+    correct=0
     for sentences, claims, scores, pms, meta in test_loader:
         claim_masks = claims.gt(0).float()
         sentence_masks = sentences.gt(0).float()
@@ -45,6 +48,15 @@ def main(_):
 
         predicted_scores, hidden = encoder(sentences, sentence_masks, claims, claim_masks)
 
+        _, ind_pred = predicted_scores.sort()
+        _, ind_true = scores.sort()
+        
+        top5_pred = ind_pred[:,-5:].data.numpy()
+        true = ind_true[:,-1:].data.numpy()
+        
+        overlaps = [len(set(top5_pred[i].tolist()).intersection(set(true[i].tolist()))) for i in range(0,top5_pred.shape[0])]
+        correct += np.sum(overlaps)
+        total += sentences.size(0)
         # DO SOME KIND OF SCORE EVALUATION HERE
 
         decoded = decoder(hidden, pms)
@@ -53,6 +65,7 @@ def main(_):
             _, word_ids = pred.max(dim=-1)
             print(' '.join([vocab.idx2word[idx] for idx in word_ids.cpu().numpy()]))
 
+    print("Top5 Accuracy {0}".format(correct/float(total)))
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
